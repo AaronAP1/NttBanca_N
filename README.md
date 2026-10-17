@@ -13,6 +13,9 @@ y políticas internas, con alertas de contradicciones y normas derogadas.
 Trazabilidad completa: pregunta (`ejecucion`) → agente (`paso_agente`) → artículo (`salida`, con
 `documento_id`) → documento (`items`) → archivo (`files`) → objeto en S3.
 
+**Guía funcional:** qué hace cada endpoint, el proceso de una consulta, 3 casos de uso y cómo conectar los
+agentes a un LLM → **[docs/ASISTENTE_NORMATIVO.md](docs/ASISTENTE_NORMATIVO.md)**.
+
 ## Tablas
 
 ```
@@ -85,6 +88,7 @@ app/
 └── api/routes/              # endpoints: health, items, files, consultas
 migrations/                  # SQL versionado del esquema
 tests/                       # tests con SQLite en memoria + moto (S3 simulado)
+Dockerfile, docker-compose*.yml  # imagen de la API y modos de prueba local
 ```
 
 ## Puesta en marcha
@@ -103,6 +107,29 @@ Para comprobar las conexiones:
 
 - `GET /health/db`: ejecuta `SELECT 1` contra RDS.
 - `GET /health/s3`: hace `head_bucket` sobre el bucket configurado.
+
+## Probar en local con Docker
+
+Requiere Docker Desktop encendido y el `.env` completo (las credenciales se pasan al contenedor; no se
+copian a la imagen). Hay dos modos:
+
+| Modo | Base de datos | S3 | Comando |
+|------|---------------|----|---------|
+| **Contra AWS** | RDS del `.env` | Bucket del `.env` | `docker compose up --build` |
+| **Base local** | PostgreSQL 18 en Docker (vacía, se migra sola) | Bucket del `.env` | `docker compose -f docker-compose.yml -f docker-compose.local-db.yml up --build` |
+
+La API queda en http://localhost:8000 (Swagger en `/docs`). Usa la **base local** para probar sin tocar los
+datos del equipo ni depender de la conexión a RDS; los archivos sí se suben al bucket real.
+
+```bash
+docker compose up --build --watch     # reinicia la API cada vez que guardas un cambio en app/
+docker compose logs -f api            # ver logs
+docker compose down                   # detener (con base local: agrega los dos -f del comando de arriba)
+docker compose -f docker-compose.yml -f docker-compose.local-db.yml down -v   # detener y borrar la base local
+```
+
+Con la base local, puedes conectarte desde DBeaver o psql a `localhost:5433` (base, usuario y contraseña:
+`nttbanca`). La imagen solo contiene `app/`, `migrations/` y las dependencias (ver `.dockerignore`).
 
 ## Endpoints
 
@@ -152,7 +179,8 @@ API sigue funcionando.
 (marcados `[Ejemplo]`). Para conectar el LLM, reemplaza el cuerpo de la función y respeta el contrato de
 [`app/agentes/contratos.py`](app/agentes/contratos.py): el orquestador valida cada salida y, si no cumple, marca
 el paso como `ERROR` indicando qué campo falla. `AGENT_STUB_DELAY_MS` (por defecto 1000) agrega una pausa en
-cada stub para que en la demo se vea avanzar el pipeline.
+cada stub para que en la demo se vea avanzar el pipeline. Ejemplos de cada agente con la API de Claude en
+[docs/ASISTENTE_NORMATIVO.md § 5](docs/ASISTENTE_NORMATIVO.md#5-implementar-los-agentes-reales).
 
 ```bash
 curl -X POST $API/consultas -H "Content-Type: application/json" \
