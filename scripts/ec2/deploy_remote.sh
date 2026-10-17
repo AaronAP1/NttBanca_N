@@ -53,6 +53,11 @@ print(param["Parameter"]["Value"])
 PY
 )
 chown -R "$APP_USER:$APP_USER" "$RELEASE"
+
+echo "==> Migraciones de base de datos"
+# Antes de cambiar de release: si fallan, la versión anterior sigue atendiendo.
+(cd "$RELEASE" && sudo -u "$APP_USER" "$BASE/venv/bin/python" -m app.db.migrate)
+
 ln -sfn "$RELEASE" "$BASE/current"
 
 echo "==> Servicio systemd"

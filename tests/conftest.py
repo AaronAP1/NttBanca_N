@@ -13,6 +13,7 @@ os.environ.update(
         "AWS_ACCESS_KEY_ID": "testing",
         "AWS_SECRET_ACCESS_KEY": "testing",
         "AWS_SESSION_TOKEN": "testing",
+        "AGENT_STUB_DELAY_MS": "0",
     }
 )
 
@@ -25,7 +26,7 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from app.db.base import Base  # noqa: E402
-from app.db.session import get_db  # noqa: E402
+from app.db.session import get_db, get_session_factory  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.s3 import S3Service, get_s3_service  # noqa: E402
 
@@ -71,6 +72,7 @@ def client(session_factory, s3_service):
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_session_factory] = lambda: session_factory
     app.dependency_overrides[get_s3_service] = lambda: s3_service
     yield TestClient(app)
     app.dependency_overrides.clear()

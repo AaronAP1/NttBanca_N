@@ -5,9 +5,9 @@ from fastapi import FastAPI
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import models  # noqa: F401  (registra los modelos en Base.metadata)
-from app.api.routes import files, health, items
+from app.api.routes import consultas, files, health, items
 from app.core.config import get_settings
-from app.db.base import Base
+from app.db.migrate import run_migrations
 from app.db.session import engine
 
 settings = get_settings()
@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     if settings.db_auto_create_tables:
         try:
-            Base.metadata.create_all(bind=engine)
-            logger.info("Tablas verificadas/creadas en Postgres")
+            applied = run_migrations(engine)
+            logger.info("Migraciones aplicadas: %s", ", ".join(applied) if applied else "ninguna pendiente")
         except SQLAlchemyError:
             # No tumbamos la app: /health/db mostrará el problema de conexión.
-            logger.exception("No se pudo conectar a Postgres para crear las tablas")
+            logger.exception("No se pudieron aplicar las migraciones en Postgres")
     yield
     engine.dispose()
 
@@ -33,3 +33,4 @@ app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 app.include_router(health.router)
 app.include_router(items.router)
 app.include_router(files.router)
+app.include_router(consultas.router)

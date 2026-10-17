@@ -1,28 +1,61 @@
 # NttBanca API
 
-API en FastAPI sobre PostgreSQL (AWS RDS) y S3.
+API en FastAPI sobre PostgreSQL (AWS RDS) y S3 para el **asistente normativo SBS**: un analista hace una
+pregunta y un pipeline de 4 agentes (BUSCADOR → VIGENCIA → CONFLICTOS → REDACTOR) responde citando normas SBS
+y políticas internas, con alertas de contradicciones y normas derogadas.
 
-- **Items**: entidades de negocio en la tabla `items`.
+- **Items (documentos)**: cada norma SBS o política interna, con tipo, código, vigencia, estado y qué
+  documento reemplaza.
 - **Files**: cada archivo se guarda en S3 y la tabla `files` guarda un registro que **apunta** al objeto
-  (`bucket` + `s3_key`) junto con sus metadatos. Un archivo puede pertenecer a un item o estar suelto.
+  (`bucket` + `s3_key`) junto con sus metadatos. Un archivo puede pertenecer a un documento o estar suelto.
+- **Consultas**: cada pregunta queda en `ejecucion` y la salida de cada agente en `paso_agente`.
+
+Trazabilidad completa: pregunta (`ejecucion`) → agente (`paso_agente`) → artículo (`salida`, con
+`documento_id`) → documento (`items`) → archivo (`files`) → objeto en S3.
 
 ## Tablas
 
 ```
-items                              files
-─────────────────────              ──────────────────────────────────────────
-id            SERIAL  PK  ◄─┐      id                 SERIAL   PK
-name          VARCHAR(255)  └───── item_id            INTEGER  FK → items.id (ON DELETE CASCADE), nullable
-description   TEXT                 bucket             VARCHAR(63)   ┐ puntero al objeto en S3
-is_active     BOOLEAN              s3_key             VARCHAR(1024) ┘ UNIQUE (bucket, s3_key)
-created_at    TIMESTAMPTZ          original_filename  VARCHAR(255)   nombre con el que se subió
-updated_at    TIMESTAMPTZ          content_type       VARCHAR(255)
-                                   size_bytes         BIGINT
-                                   etag               VARCHAR(255)
-                                   created_at / updated_at  TIMESTAMPTZ
+items (documentos)                        files
+─────────────────────────────────         ──────────────────────────────────────────
+id             SERIAL  PK  ◄─┐  ◄────┐    id                 SERIAL   PK
+name           VARCHAR(255)  │       └─── item_id            INTEGER  FK → items.id (ON DELETE CASCADE), nullable
+description    TEXT          │            bucket             VARCHAR(63)   ┐ puntero al objeto en S3
+is_active      BOOLEAN       │            s3_key             VARCHAR(1024) ┘ UNIQUE (bucket, s3_key)
+tipo           SBS | POLITICA_INTERNA     original_filename  VARCHAR(255)
+codigo_norma   TEXT          │            content_type       VARCHAR(255)
+fecha_vigencia DATE          │            size_bytes         BIGINT
+estado         VIGENTE | DEROGADA         etag               VARCHAR(255)
+reemplaza_a    INTEGER ──────┘ FK → items.id (ON DELETE SET NULL), nullable
+created_at / updated_at  TIMESTAMPTZ      created_at / updated_at  TIMESTAMPTZ
+
+ejecucion                                 paso_agente
+─────────────────────────────────         ──────────────────────────────────────────
+id             UUID  PK  ◄─────────────── ejecucion_id  UUID  FK → ejecucion.id (ON DELETE CASCADE)
+sesion_id      UUID                       id            UUID  PK
+pregunta       TEXT                       agente        BUSCADOR | VIGENCIA | CONFLICTOS | REDACTOR
+estado         PENDIENTE | EN_PROCESO |   orden         INT   UNIQUE (ejecucion_id, orden)
+               COMPLETADO | ERROR         estado        COMPLETADO | ERROR
+paso_actual    agente en curso, nullable  salida        JSONB (salida del agente)
+respuesta      TEXT                       duracion_ms   INT
+creado_en / actualizado_en  TIMESTAMPTZ   error         TEXT
+                                          creado_en     TIMESTAMPTZ
 ```
 
-Las tablas se crean solas al arrancar (`DB_AUTO_CREATE_TABLES=true`).
+### Migraciones
+
+El esquema se versiona con archivos SQL en [`migrations/`](migrations/), aplicados por
+[`app/db/migrate.py`](app/db/migrate.py) (sin dependencias extra). Cada archivo se aplica una sola vez, en orden,
+dentro de una transacción, y queda registrado en la tabla `schema_migrations`.
+
+```bash
+python -m app.db.migrate --status    # aplicadas y pendientes (solo lectura)
+python -m app.db.migrate --dry-run   # aplica y deshace, para probar
+python -m app.db.migrate             # aplica las pendientes
+```
+
+Además se aplican solas al arrancar la API (`DB_AUTO_CREATE_TABLES=true`) y en cada despliegue a EC2. Para
+cambiar el esquema, agrega un archivo nuevo (`0003_descripcion.sql`); no edites uno ya aplicado.
 
 ### Consistencia entre S3 y la BD
 
@@ -39,16 +72,19 @@ Las keys se generan como `S3_KEY_PREFIX/<uuid>.<ext>`; el nombre original vive e
 
 ```
 app/
-├── main.py              # crea la app, registra routers y crea tablas al arrancar
-├── core/config.py       # configuración leída del .env (pydantic-settings)
-├── db/                  # engine, sesión y Base de SQLAlchemy
-├── models/              # modelos ORM: Item, FileRecord
-├── schemas/             # modelos Pydantic de entrada/salida
-├── crud/                # consultas a Postgres
-├── services/s3.py       # cliente y operaciones sobre S3
-├── services/files.py    # operaciones que tocan S3 + BD a la vez
-└── api/routes/          # endpoints: health, items, files
-tests/                   # tests con SQLite en memoria + moto (S3 simulado)
+├── main.py                  # crea la app, registra routers y aplica migraciones al arrancar
+├── core/config.py           # configuración leída del .env (pydantic-settings)
+├── db/                      # engine, sesión, Base de SQLAlchemy y runner de migraciones
+├── models/                  # modelos ORM: Item, FileRecord, Ejecucion, PasoAgente y enums
+├── schemas/                 # modelos Pydantic de entrada/salida
+├── crud/                    # consultas a Postgres
+├── agentes/                 # un archivo por agente (stubs) y contratos.py con la forma de cada salida
+├── services/s3.py           # cliente y operaciones sobre S3
+├── services/files.py        # operaciones que tocan S3 + BD a la vez
+├── services/orquestador.py  # corre los 4 agentes en orden y persiste cada paso
+└── api/routes/              # endpoints: health, items, files, consultas
+migrations/                  # SQL versionado del esquema
+tests/                       # tests con SQLite en memoria + moto (S3 simulado)
 ```
 
 ## Puesta en marcha
@@ -81,6 +117,10 @@ Para comprobar las conexiones:
 | PATCH  | `/items/{id}`        | Actualizar campos parcialmente                     |
 | DELETE | `/items/{id}`        | Eliminar el item, sus registros y sus objetos en S3 |
 
+Campos normativos, todos opcionales al crear (los clientes que no los envían siguen funcionando igual):
+`tipo` (`SBS` | `POLITICA_INTERNA`), `codigo_norma`, `fecha_vigencia` (`YYYY-MM-DD`), `estado`
+(`VIGENTE` por defecto | `DEROGADA`) y `reemplaza_a` (id de otro documento; `null` lo quita).
+
 ### Files
 
 | Método | Ruta                          | Descripción                                                  |
@@ -93,6 +133,33 @@ Para comprobar las conexiones:
 | PUT    | `/files/{id}`                 | Reemplazar el contenido (multipart: `file`)                  |
 | PATCH  | `/files/{id}`                 | Cambiar `original_filename` o `item_id` (null = desvincular) |
 | DELETE | `/files/{id}`                 | Eliminar registro y objeto en S3                             |
+
+### Consultas (asistente normativo)
+
+| Método | Ruta                               | Descripción                                                              |
+|--------|------------------------------------|--------------------------------------------------------------------------|
+| POST   | `/consultas`                       | Body `{"pregunta", "sesion_id"?}`. Responde **202** al instante con `{ejecucion_id, sesion_id, estado}` y corre el pipeline en segundo plano. Sin `sesion_id`, crea una sesión nueva. |
+| GET    | `/consultas/{id}`                  | Ejecución con `estado`, `paso_actual`, `respuesta` y sus `pasos` en orden. Pensado para polling cada 1-2 s hasta `COMPLETADO` o `ERROR`. |
+| GET    | `/sesiones/{sesion_id}/consultas`  | Historial de la sesión, más reciente primero (`limit`, por defecto 50).  |
+
+Cómo avanza una ejecución: `PENDIENTE` → `EN_PROCESO` (con `paso_actual` = BUSCADOR, VIGENCIA, CONFLICTOS,
+REDACTOR) → `COMPLETADO` (con `respuesta`; `paso_actual` vuelve a `null`). Si un agente falla, su paso queda en
+`ERROR` con el mensaje, la ejecución pasa a `ERROR` con `paso_actual` en ese agente y el pipeline se detiene; la
+API sigue funcionando.
+
+**Agentes.** Cada uno vive en `app/agentes/<agente>.py` con la firma `(pregunta, contexto_previo) -> dict`, donde
+`contexto_previo["BUSCADOR"]`, etc. trae la salida de los anteriores. Hoy son **stubs** con datos de ejemplo
+(marcados `[Ejemplo]`). Para conectar el LLM, reemplaza el cuerpo de la función y respeta el contrato de
+[`app/agentes/contratos.py`](app/agentes/contratos.py): el orquestador valida cada salida y, si no cumple, marca
+el paso como `ERROR` indicando qué campo falla. `AGENT_STUB_DELAY_MS` (por defecto 1000) agrega una pausa en
+cada stub para que en la demo se vea avanzar el pipeline.
+
+```bash
+curl -X POST $API/consultas -H "Content-Type: application/json" \
+  -d '{"pregunta": "¿Cuál es el plazo para reportar eventos de pérdida?"}'
+curl $API/consultas/<ejecucion_id>
+curl $API/sesiones/<sesion_id>/consultas
+```
 
 ## Configurar AWS
 
@@ -127,6 +194,6 @@ pytest
 
 ## Próximos pasos sugeridos
 
-- Reemplazar `create_all` por migraciones con Alembic cuando el esquema empiece a cambiar.
-- Renombrar/duplicar `Item` según las entidades reales del negocio.
+- Conectar los agentes al LLM (ver `app/agentes/`).
 - Agregar autenticación a los endpoints.
+- Si la API se reinicia a mitad de un pipeline, esa ejecución queda en `EN_PROCESO`; hoy no se retoma.

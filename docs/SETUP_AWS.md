@@ -584,4 +584,4 @@ Lo de esta guía es para desarrollo. Para un entorno real:
   entorno. Las variables de entorno tienen prioridad sobre el `.env`.
 - Buckets y bases **separados por entorno** (dev, qa, prod), *Deletion protection* activado y backups con más
   días de retención.
-- **Migraciones con Alembic** en lugar de `DB_AUTO_CREATE_TABLES=true`.
+- **Migraciones solo en el despliegue** (`DB_AUTO_CREATE_TABLES=false` en la app) cuando haya varias instancias.

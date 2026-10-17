@@ -57,7 +57,7 @@ La primera vez tarda entre 5 y 10 minutos. El script hace, en orden:
 | 2    | Parámetro `SecureString` `/nttbanca/dev/env` con la configuración                                      |
 | 3    | Security group `nttbanca-api-dev` (HTTP 80 desde internet) y regla en el SG de RDS (5432 desde la API) |
 | 4    | Instancia `nttbanca-api-dev`: Ubuntu 24.04 ARM, `t4g.micro`, IMDSv2                                    |
-| 5    | Sube `app/` y `requirements.txt` a `s3://<bucket>/_deploy/` y los instala vía SSM                      |
+| 5    | Sube `app/`, `migrations/` y `requirements.txt` a `s3://<bucket>/_deploy/`, aplica las migraciones y reinicia la API vía SSM |
 | 6    | Prueba `/health`, `/health/db` y `/health/s3` desde tu PC                                              |
 
 Al final muestra la URL:
@@ -158,5 +158,5 @@ aws s3 rm "s3://$(grep ^S3_BUCKET_NAME= .env | cut -d= -f2 | tr -d '\r')/_deploy
 - **Autenticación** en la API (API key o JWT).
 - **HTTPS**: un dominio con certificado (por ejemplo Caddy en la instancia, o un balanceador con ACM).
 - **RDS privada** (*Public access* en No) y sin la regla de tu IP.
-- **Migraciones con Alembic** en lugar de crear tablas al arrancar.
+- **Migraciones solo en el despliegue** (`DB_AUTO_CREATE_TABLES=false` en la app) cuando haya varias instancias.
 - Para algo más robusto que una sola instancia: ECS (Fargate) detrás de un balanceador.

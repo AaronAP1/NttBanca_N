@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     db_password: str
     db_sslmode: str = "require"
     db_connect_timeout: int = 10
+    # Al arrancar aplica las migraciones pendientes de migrations/
     db_auto_create_tables: bool = True
 
     # AWS / S3
@@ -29,6 +30,9 @@ class Settings(BaseSettings):
     s3_bucket_name: str
     s3_key_prefix: str = "uploads"
     s3_presigned_url_expiration: int = 3600
+
+    # Orquestador: pausa de cada agente stub, para que la demo muestre el avance (0 = sin pausa)
+    agent_stub_delay_ms: int = 1000
 
     @property
     def database_url(self) -> URL:

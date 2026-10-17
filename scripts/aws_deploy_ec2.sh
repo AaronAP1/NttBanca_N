@@ -239,7 +239,7 @@ info "SSM en línea."
 
 
 step "5/6 Subiendo el código e instalándolo en la instancia"
-tar -czf "$TMP_DIR/app.tar.gz" --exclude='__pycache__' --exclude='*.pyc' app requirements.txt
+tar -czf "$TMP_DIR/app.tar.gz" --exclude='__pycache__' --exclude='*.pyc' app migrations requirements.txt
 aws s3 cp "$TMP_DIR/app.tar.gz" "s3://$BUCKET/_deploy/app.tar.gz" --only-show-errors
 aws s3 cp scripts/ec2/deploy_remote.sh "s3://$BUCKET/_deploy/deploy_remote.sh" --only-show-errors
 # URLs firmadas: la instancia descarga sin necesitar permisos sobre _deploy/
@@ -279,7 +279,7 @@ if [ "$STATUS" != "Success" ]; then
     --query StandardErrorContent | tail -n 40
   die "El despliegue en la instancia terminó con estado: $STATUS"
 fi
-printf '%s\n' "$REMOTE_OUT" | grep -E '^(==>|/health|\{|Python)' | sed 's/^/    /' || true
+printf '%s\n' "$REMOTE_OUT" | grep -E '^(==>|/health|\{|Python|Migraciones|Esquema)' | sed 's/^/    /' || true
 
 
 step "6/6 Probando desde tu PC: $API_URL"

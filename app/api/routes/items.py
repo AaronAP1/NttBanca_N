@@ -20,8 +20,20 @@ def get_item_or_404(item_id: int, db: Session = Depends(get_db)) -> Item:
     return item
 
 
+def ensure_replaced_exists(db: Session, reemplaza_a: int | None, item_id: int | None = None) -> None:
+    if reemplaza_a is None:
+        return
+    if reemplaza_a == item_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Un documento no puede reemplazarse a sí mismo"
+        )
+    if crud.get_item(db, reemplaza_a) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Documento a reemplazar no encontrado")
+
+
 @router.post("", response_model=ItemRead, status_code=status.HTTP_201_CREATED)
 def create_item(data: ItemCreate, db: Session = Depends(get_db)):
+    ensure_replaced_exists(db, data.reemplaza_a)
     return crud.create_item(db, data)
 
 
@@ -51,6 +63,7 @@ def list_item_files(
 
 @router.patch("/{item_id}", response_model=ItemRead)
 def update_item(data: ItemUpdate, item: Item = Depends(get_item_or_404), db: Session = Depends(get_db)):
+    ensure_replaced_exists(db, data.reemplaza_a, item_id=item.id)
     return crud.update_item(db, item, data)
 
 
