@@ -57,7 +57,7 @@ tests/                   # tests con SQLite en memoria + moto (S3 simulado)
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env      # y completa las credenciales
+copy .env.example .env      # y completa las credenciales (ver docs/SETUP_AWS.md)
 fastapi dev app/main.py
 ```
 
@@ -94,30 +94,27 @@ Para comprobar las conexiones:
 | PATCH  | `/files/{id}`                 | Cambiar `original_filename` o `item_id` (null = desvincular) |
 | DELETE | `/files/{id}`                 | Eliminar registro y objeto en S3                             |
 
-## Lo que necesitas configurar en AWS
+## Configurar AWS
 
-**RDS**
-- El security group de la instancia debe permitir el puerto 5432 desde tu IP (o desde donde corra la API).
-- Si te conectas desde tu PC, la instancia debe tener *Public access* habilitado o necesitas VPN/bastión.
-- La base indicada en `DB_NAME` debe existir; las tablas se crean solas al arrancar.
+La guía paso a paso para crear el bucket de S3, el usuario IAM y la base PostgreSQL en RDS, llenar el `.env` y
+probar el backend está en **[docs/SETUP_AWS.md](docs/SETUP_AWS.md)**.
 
-**S3**: el usuario o rol IAM necesita como mínimo:
+Para crear todo de una vez desde la terminal (en Windows, Git Bash), con el AWS CLI ya configurado:
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    { "Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": "arn:aws:s3:::MI-BUCKET" },
-    {
-      "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-      "Resource": "arn:aws:s3:::MI-BUCKET/*"
-    }
-  ]
-}
+```bash
+bash scripts/aws_setup_dev.sh
 ```
 
-Si dejas `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY` vacíos, boto3 usa `~/.aws/credentials` o el rol IAM de la máquina (EC2, ECS, Lambda), que es lo recomendado en producción.
+## Desplegar en EC2
+
+Para publicar la API en una EC2 junto a la RDS, de modo que otros puedan consumirla, sigue
+**[docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md)**. En resumen:
+
+```bash
+bash scripts/aws_deploy_ec2.sh
+```
+
+Para publicar cambios del código, vuelve a correr el mismo comando.
 
 ## Tests
 

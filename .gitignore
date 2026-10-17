@@ -1,4 +1,8 @@
 .env
+.env.*
+!.env.example
+.aws-s3-policy.json
+.deploy-tmp/
 .venv/
 venv/
 __pycache__/
